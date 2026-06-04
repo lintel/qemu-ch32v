@@ -1,0 +1,7 @@
+# Downloaded source tarballs
+downloads/
+
+# Build output
+build/
+dist/
+.marscode/

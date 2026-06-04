@@ -1,0 +1,56 @@
+--- a/hw/riscv/Kconfig
++++ b/hw/riscv/Kconfig
+@@ -9,6 +9,14 @@
+ 
+ # RISC-V machines in alphabetical order
+ 
++# WCH CH32：ch32-v.c 内多台 machine（-M ch32v317 等）。
++config CH32V
++    bool
++    default y
++    depends on RISCV32
++    select UNIMP
++    select RISCV_ACLINT
++
+ config MICROCHIP_PFSOC
+     bool
+     default y
+--- a/hw/riscv/meson.build
++++ b/hw/riscv/meson.build
+@@ -5,6 +5,36 @@
+ riscv_ss.add(when: 'CONFIG_OPENTITAN', if_true: files('opentitan.c'))
+ riscv_ss.add(when: 'CONFIG_RISCV_VIRT', if_true: files('virt.c'))
+ riscv_ss.add(when: 'CONFIG_SHAKTI_C', if_true: files('shakti_c.c'))
++# WCH CH32 外设与整机模型（每行一个文件，便于增删维护与 code review）
++riscv_ss.add(when: 'CONFIG_CH32V', if_true: files(
++    'ch32-adc.c',
++    'ch32-bkp.c',
++    'ch32-boards.c',
++    'ch32-boot.c',
++    'ch32-crc.c',
++    'ch32-dma.c',
++    'ch32-eth-dwmac.c',
++    'ch32-eth-10m.c',
++    'ch32-flash.c',
++    'ch32-gpio-afio.c',
++    'ch32-hex-loader.c',
++    'ch32-i2c.c',
++    'ch32-iwdt.c',
++    'ch32-pwr.c',
++    'ch32-rcc.c',
++    'ch32-rng.c',
++    'ch32-rtc.c',
++    'ch32-sdio.c',
++    'ch32-spi.c',
++    'ch32-stk-pfic.c',
++    'ch32-tim.c',
++    'ch32-usart.c',
++    'ch32-usb-hs-host.c',
++    'ch32-usb-fs-host.c',
++    'ch32-usb.c',
++    'ch32-v.c',
++    'ch32-wwdg.c',
++))
+ riscv_ss.add(when: 'CONFIG_SIFIVE_E', if_true: files('sifive_e.c'))
+ riscv_ss.add(when: 'CONFIG_SIFIVE_U', if_true: files('sifive_u.c'))
+ riscv_ss.add(when: 'CONFIG_SPIKE', if_true: files('spike.c'))
