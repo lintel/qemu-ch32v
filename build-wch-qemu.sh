@@ -260,7 +260,7 @@ if [[ ! -f "${src_dir}/configure" ]]; then
   rm -rf "${src_dir}"
   tar -xJf "$archive_path" -C "${BUILD_TOP}" \
     --exclude='qemu-*/roms' \
-    --exclude='qemu-*/tests/lcitool'
+    --exclude='qemu-*/tests/lcitool/libvirt-ci'
 else
   echo "==> 已有源码目录: ${src_dir}"
 fi

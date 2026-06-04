@@ -261,7 +261,7 @@ if [[ ! -f "${src_dir}/configure" ]]; then
   rm -rf "${src_dir}"
   tar -xJf "$archive_path" -C "${BUILD_TOP}" \
     --exclude='qemu-*/roms' \
-    --exclude='qemu-*/tests/lcitool'
+    --exclude='qemu-*/tests/lcitool/libvirt-ci'
 else
   echo "==> Source directory already exists: ${src_dir}"
 fi
