@@ -338,7 +338,10 @@ _patch_stamp="${src_dir}/.wch-patches-applied"
 if [[ -d "${REPO_ROOT}/patches/qemu" ]]; then
   shopt -s nullglob
   _patch_files=("${REPO_ROOT}/patches/qemu"/*.patch)
-  readarray -t _patch_list < <(printf '%s\n' "${_patch_files[@]}" | LC_ALL=C sort)
+  _patch_list=()
+  while IFS= read -r _line; do
+    [[ -n "$_line" ]] && _patch_list+=("$_line")
+  done < <(printf '%s\n' "${_patch_files[@]}" | LC_ALL=C sort)
   for _p in "${_patch_list[@]}"; do
     [[ -f "${_p}" ]] || continue
     echo "==> Applying patch: $(basename "${_p}")"
