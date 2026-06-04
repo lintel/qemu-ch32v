@@ -1,5 +1,7 @@
 [English](README_en.md) | 中文
 
+**欢迎通过社区参与开发，支持国产MCU生态，义无反顾！**
+
 # QEMU CH32V — 沁恒 QingKe RISC-V MCU Qemu仿真系统
 
 基于 **QEMU 10.2.2** 的 **WCH CH32 / QingKe** MCU 整机仿真环境，支持 CH32V003 ~ CH32V407 / CH32H417 全系列。在 PC 上即可完成固件的指令级验证、USART 串口调试、以太网协议栈联调、USB 设备枚举，以及 GDB 断点调试——无需真机硬件。
