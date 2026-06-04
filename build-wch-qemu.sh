@@ -258,7 +258,9 @@ fi
 if [[ ! -f "${src_dir}/configure" ]]; then
   echo "==> 解压到 ${src_dir}"
   rm -rf "${src_dir}"
-  tar -xJf "$archive_path" -C "${BUILD_TOP}"
+  tar -xJf "$archive_path" -C "${BUILD_TOP}" \
+    --exclude='qemu-*/roms' \
+    --exclude='qemu-*/tests/lcitool'
 else
   echo "==> 已有源码目录: ${src_dir}"
 fi
