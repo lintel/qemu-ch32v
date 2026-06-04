@@ -383,6 +383,7 @@ if [[ ! -f "${obj_dir}/build.ninja" ]]; then
       --disable-install-blobs \
       --disable-cocoa \
       --disable-guest-agent \
+      --disable-tests \
       --disable-werror
   )
 else
