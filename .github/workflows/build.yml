@@ -68,6 +68,10 @@ jobs:
             artifact: windows-x86_64
             shell: msys2
 
+    # Enable native Windows symlinks so tar can extract QEMU source correctly
+    env:
+      MSYS: winsymlinks:nativestrict
+
     defaults:
       run:
         shell: ${{ matrix.shell == 'msys2' && 'msys2 {0}' || 'bash' }}
