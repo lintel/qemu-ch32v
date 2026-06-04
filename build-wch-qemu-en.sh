@@ -159,9 +159,9 @@ _wch_verify_archive_sha256() {
     exit 1
   fi
   local expect got
-  expect="${WCH_QEMU_SHA256,,}"
+  expect=$(printf '%s' "$WCH_QEMU_SHA256" | tr '[:upper:]' '[:lower:]')
   got=$(sha256sum "$file" | awk '{print $1}')
-  got="${got,,}"
+  got=$(printf '%s' "$got" | tr '[:upper:]' '[:lower:]')
   if [[ "$got" != "$expect" ]]; then
     echo "Error: SHA256 mismatch: $(basename "$file")" >&2
     echo "  Expected: $expect" >&2
