@@ -36,6 +36,7 @@
 #include "ch32-machine-internal.h"
 
 #include <errno.h>
+#include <glib/gstdio.h>    /* GStatBuf, g_stat — not implicit on MinGW */
 
 /*
  * SRAM / 外设总线背景 IO：0x20000000 片内 SRAM 与 0x40000000 外设总线
