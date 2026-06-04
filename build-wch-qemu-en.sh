@@ -376,6 +376,7 @@ if [[ ! -f "${obj_dir}/build.ninja" ]]; then
       --disable-bsd-user \
       --disable-linux-user \
       --disable-install-blobs \
+      --disable-cocoa \
       --disable-werror
   )
 else
