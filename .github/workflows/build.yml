@@ -9,6 +9,7 @@ name: Build QEMU-CH32V
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
     paths-ignore:
       - '**.md'
       - 'docs/**'
