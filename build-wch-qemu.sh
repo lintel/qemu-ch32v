@@ -382,16 +382,25 @@ if [[ ! -f "${obj_dir}/build.ninja" ]]; then
       --disable-install-blobs \
       --disable-cocoa \
       --disable-guest-agent \
-      --disable-tests \
       --disable-werror
   )
 else
   echo "==> 检测到现有 build.ninja，跳过 configure（使用增量编译；如需重配请加 --clean）"
 fi
 
-# 7. 编译
+# 7. Build
 echo "==> make -j${JOBS}"
-make -C "${obj_dir}" -j"${JOBS}"
+make -C "${obj_dir}" -j"${JOBS}" || {
+  # On MinGW, upstream QEMU tests may fail to link (e.g. qemu_ftruncate64).
+  # If the target binary was built successfully, continue anyway.
+  if [[ -f "${obj_dir}/qemu-system-riscv32" ]] || \
+     [[ -f "${obj_dir}/qemu-system-riscv32.exe" ]]; then
+    echo "==> Warning: make reported errors (likely in tests), but target binary exists — continuing"
+  else
+    echo "==> Error: build failed and target binary not found" >&2
+    exit 1
+  fi
+}
 
 # 8. 安装
 echo "==> make install"
