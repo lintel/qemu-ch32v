@@ -1,0 +1,188 @@
+# ──────────────────────────────────────────────────────────────────────
+#  QEMU-CH32V  ·  Multi-platform Build & Release
+#
+#  Build qemu-system-riscv32 with WCH CH32/QingKe MCU machine models
+#  for Linux / macOS / Windows  ×  x86_64 / arm64.
+# ──────────────────────────────────────────────────────────────────────
+name: Build QEMU-CH32V
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+    inputs:
+      qemu_version:
+        description: 'QEMU version to build (default: 10.2.2)'
+        required: false
+        default: '10.2.2'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WCH_QEMU_VERSION: ${{ github.event.inputs.qemu_version || '10.2.2' }}
+
+# ═══════════════════════════════════════════════════════════════════
+#  Build matrix:  5 platform × arch combinations
+# ═══════════════════════════════════════════════════════════════════
+jobs:
+  build:
+    name: Build · ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux ────────────────────────────────────────────────
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+            artifact: linux-x86_64
+            shell: bash
+          - name: Linux aarch64
+            runner: ubuntu-24.04-arm
+            artifact: linux-aarch64
+            shell: bash
+          # ── macOS ────────────────────────────────────────────────
+          - name: macOS x86_64
+            runner: macos-13
+            artifact: macos-x86_64
+            shell: bash
+          - name: macOS arm64
+            runner: macos-14
+            artifact: macos-arm64
+            shell: bash
+          # ── Windows ──────────────────────────────────────────────
+          - name: Windows x86_64
+            runner: windows-latest
+            artifact: windows-x86_64
+            shell: msys2
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell == 'msys2' && 'msys2 {0}' || 'bash' }}
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Cache QEMU source tarball ─────────────────────────────
+      - name: Cache QEMU source tarball
+        uses: actions/cache@v4
+        with:
+          path: downloads/archives
+          key: qemu-src-${{ env.WCH_QEMU_VERSION }}
+
+      # ── 3. Install dependencies (per-platform) ──────────────────
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git python3 ninja-build flex bison \
+            pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev libslirp-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install glib pixman ninja pkg-config libslirp flex bison coreutils
+          # Expose GNU coreutils (sha256sum, nproc, etc.) in PATH
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+          # Ensure brew-installed flex/bison take precedence over outdated system versions
+          echo "$(brew --prefix bison)/bin"                >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin"                 >> "$GITHUB_PATH"
+
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-pixman
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-libslirp
+            flex
+            bison
+            patch
+            tar
+            xz
+
+      # ── 4. Build QEMU ───────────────────────────────────────────
+      - name: Build qemu-system-riscv32
+        run: |
+          chmod +x build-wch-qemu-en.sh
+          ./build-wch-qemu-en.sh \
+            --no-install-deps \
+            --force-rebuild \
+            -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+      # ── 5. Verify binary ────────────────────────────────────────
+      - name: Verify qemu-system-riscv32
+        run: |
+          QEMU_BIN="dist/qemu-${WCH_QEMU_VERSION}-riscv32/bin/qemu-system-riscv32"
+          # Windows binary has .exe extension
+          if [[ ! -f "$QEMU_BIN" ]] && [[ -f "${QEMU_BIN}.exe" ]]; then
+            QEMU_BIN="${QEMU_BIN}.exe"
+          fi
+          "$QEMU_BIN" --version
+          echo "--- Supported CH32 machines ---"
+          "$QEMU_BIN" -M help | grep -i ch32 || true
+
+      # ── 6. Upload artifact ──────────────────────────────────────
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-${{ env.WCH_QEMU_VERSION }}-ch32v-riscv32-${{ matrix.artifact }}
+          path: dist/qemu-${{ env.WCH_QEMU_VERSION }}-riscv32/
+          retention-days: 30
+
+  # ════════════════════════════════════════════════════════════════
+  #  Release  ·  Triggered only on v* tag push
+  # ════════════════════════════════════════════════════════════════
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: qemu-*-ch32v-riscv32-*
+
+      - name: Package release tarballs
+        run: |
+          mkdir -p release
+          for dir in artifacts/qemu-*-ch32v-riscv32-*; do
+            name=$(basename "$dir")
+            echo "==> Packaging ${name} ..."
+            tar -cJf "release/${name}.tar.xz" -C "$dir" .
+          done
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*.tar.xz
