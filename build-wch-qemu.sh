@@ -404,7 +404,20 @@ make -C "${obj_dir}" -j"${JOBS}" || {
 
 # 8. 安装
 echo "==> make install"
-make -C "${obj_dir}" install
+make -C "${obj_dir}" install || {
+  # ninja install 可能重新触发 MinGW 上失败的测试构建。
+  # 回退到手动安装二进制文件。
+  _bin="${obj_dir}/qemu-system-riscv32"
+  [[ -f "${_bin}.exe" ]] && _bin="${_bin}.exe"
+  if [[ -f "${_bin}" ]]; then
+    echo "==> 警告: make install 失败，回退到手动安装"
+    mkdir -p "${PREFIX}/bin"
+    cp -f "${_bin}" "${PREFIX}/bin/"
+  else
+    echo "==> 错误: 安装失败且未找到目标二进制" >&2
+    exit 1
+  fi
+}
 
 echo ""
 echo "==> 完成。可执行文件位于："

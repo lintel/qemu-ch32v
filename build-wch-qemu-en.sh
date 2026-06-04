@@ -405,7 +405,20 @@ make -C "${obj_dir}" -j"${JOBS}" || {
 
 # 8. Install
 echo "==> make install"
-make -C "${obj_dir}" install
+make -C "${obj_dir}" install || {
+  # ninja install may re-trigger the failing test build on MinGW.
+  # Fall back to manual binary installation.
+  _bin="${obj_dir}/qemu-system-riscv32"
+  [[ -f "${_bin}.exe" ]] && _bin="${_bin}.exe"
+  if [[ -f "${_bin}" ]]; then
+    echo "==> Warning: make install failed, falling back to manual install"
+    mkdir -p "${PREFIX}/bin"
+    cp -f "${_bin}" "${PREFIX}/bin/"
+  else
+    echo "==> Error: install failed and binary not found" >&2
+    exit 1
+  fi
+}
 
 echo ""
 echo "==> Done. Executable installed at:"
