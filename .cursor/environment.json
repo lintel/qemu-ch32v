@@ -1,0 +1,5 @@
+{
+  "name": "QEMU-CH32V",
+  "user": "ubuntu",
+  "install": "./build-wch-qemu-en.sh -j\"$(nproc)\""
+}
