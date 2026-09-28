@@ -280,6 +280,8 @@ typedef struct Ch32DmaState {
 typedef struct Ch32TimState {
     MemoryRegion iomem;
     QEMUTimer   *timer;
+    QEMUTimer   *compare_timer;
+    uint16_t compare_flags;
 
     /* Shadow registers (16-bit values stored as 32-bit for simplicity) */
     uint16_t ctlr1;
