@@ -454,6 +454,8 @@ typedef struct Ch32Usart1State {
      * RX 节拍定时器：逐字节投喂 rx_stage_buf，模拟串口字节间隔。
      * 防止 TCP/PTY backend 一次推入多字节导致 RT-Thread finsh 信号量计数不足。
      */
+    QEMUTimer *idle_timer;
+    bool status_read;
     QEMUTimer *rx_timer;
     uint8_t  rx_stage_buf[CH32_USART1_RXFIFO_DEPTH]; /* 暂存待投喂字节 */
     unsigned rx_stage_head; /* 下一个待投喂位置 */
@@ -535,6 +537,7 @@ typedef struct Ch32I2cState {
 
 typedef struct Ch32MachineState {
     MachineState parent;
+    bool usart1_echo;
     RISCVHartArrayState cpus;
     MemoryRegion flash;
     MemoryRegion boot_remap; /* 0x00000000 启动重映射：根据 boot_mode 映射到 Flash/SYSMEM */

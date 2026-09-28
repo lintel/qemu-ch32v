@@ -69,8 +69,28 @@
 #define CTLR1_PEIE    (1u <<  8)
 #define CTLR1_UE      (1u << 13)
 
-/* TX drain 间隔（纳秒）：约 1 个仿真字节的时间，足够快但不浪费 CPU */
-#define CH32_USART1_TX_DRAIN_NS 10000LL
+static bool ch32_usart1_rx_enabled(const Ch32MachineState *m);
+
+static uint64_t ch32_usart1_frame_ns(const Ch32MachineState *m)
+{
+    uint32_t cfgr = m->rcc_shadow.words[1];
+    unsigned ppre = (cfgr >> 11) & 7;
+    uint32_t clock = ch32_rcc_get_hclk_hz(m) / (ppre < 4 ? 1 : 1u << (ppre - 3));
+    unsigned bits = 1 + ((m->usart1.ctlr1 & (1u << 12)) ? 9 : 8);
+    unsigned stop2[] = {2, 1, 4, 3};
+    unsigned half_bits = bits * 2 + stop2[(m->usart1.ctlr2 >> 12) & 3];
+    return clock && m->usart1.brr ?
+        ((uint64_t)m->usart1.brr * half_bits * 500000000 + clock - 1) / clock : 10000;
+}
+
+static void ch32_usart1_idle(void *opaque)
+{
+    Ch32MachineState *m = opaque;
+    if (ch32_usart1_rx_enabled(m)) {
+        m->usart1.statr |= STATR_IDLE;
+        ch32_usart1_meip_resync(m);
+    }
+}
 
 /* CTLR3 DMA 控制位（手册表 18-4） */
 #define CTLR3_DMAR    (1u << 6)   /* RX DMA 使能 */
@@ -197,6 +217,7 @@ void ch32_usart1_meip_resync(Ch32MachineState *m)
     uint32_t c1 = m->usart1.ctlr1;
 
     bool irq =  ienr_on && (
+                ((c1 & CTLR1_IDLEIE) && (st & STATR_IDLE)) ||
                 ((c1 & CTLR1_RXNEIE) && (st & STATR_RXNE)) ||
                 ((c1 & CTLR1_TXEIE)  && (st & STATR_TXE))  ||
                 ((c1 & CTLR1_TCIE)   && (st & STATR_TC)));
@@ -271,11 +292,22 @@ static void ch32_usart1_tx_drain(void *opaque)
             /* backend 暂时不可写，稍后重试 */
             timer_mod(m->usart1.tx_timer,
                       qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                      CH32_USART1_TX_DRAIN_NS);
+                      ch32_usart1_frame_ns(m));
             goto done;
         }
         m->usart1.tx_head = (m->usart1.tx_head + 1) % CH32_USART1_TXFIFO_DEPTH;
+        if (m->usart1_echo && ch32_usart1_rx_enabled(m) && !ch32_rxfifo_full(m)) {
+            m->usart1.rx_buf[m->usart1.rx_tail] = ch;
+            m->usart1.rx_tail = (m->usart1.rx_tail + 1) % CH32_USART1_RXFIFO_DEPTH;
+            m->usart1.rx_pending = true;
+            m->usart1.rdr = m->usart1.rx_buf[m->usart1.rx_head];
+        }
         changed = true;
+        if (!ch32_txfifo_empty(m)) {
+            timer_mod(m->usart1.tx_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                      ch32_usart1_frame_ns(m));
+            goto done;
+        }
     }
 
     /* TX FIFO 已空 */
@@ -339,6 +371,7 @@ static void ch32_usart1_receive(void *opaque, const uint8_t *buf, int size)
     if (!ch32_usart1_rx_enabled(m)) {
         return;
     }
+    timer_del(m->usart1.idle_timer);
     /* 将字节导入 stage 缓冲 */
     for (i = 0; i < size; i++) {
         unsigned next = (m->usart1.rx_stage_tail + 1) % CH32_USART1_RXFIFO_DEPTH;
@@ -507,7 +540,7 @@ static void ch32_usart1_rx_tick(void *opaque)
     /* rx_buf 满：稍后重试 */
     if (ch32_rxfifo_full(m)) {
         timer_mod(m->usart1.rx_timer,
-                  qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + CH32_USART1_RX_BYTE_NS);
+                  qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ch32_usart1_frame_ns(m));
         return;
     }
 
@@ -535,8 +568,10 @@ static void ch32_usart1_rx_tick(void *opaque)
     /* 如果 stage 还有剩余字节，安排下一次投喂 */
     if (m->usart1.rx_stage_head != m->usart1.rx_stage_tail) {
         timer_mod(m->usart1.rx_timer,
-                  qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + CH32_USART1_RX_BYTE_NS);
+                  qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ch32_usart1_frame_ns(m));
     } else {
+        timer_mod(m->usart1.idle_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                  ch32_usart1_frame_ns(m));
         /* stage 清空，通知 backend 可以再发 */
         ch32_usart1_try_accept_rx(m);
     }
@@ -552,6 +587,7 @@ static uint64_t ch32_usart1_read(void *opaque, hwaddr addr, unsigned size)
     switch (addr) {
     case 0x00: /* STATR */
         {
+            m->usart1.status_read = true;
             uint16_t st = ch32_usart1_statr_hw(m);
             return (size == 1) ? (st & 0xffu) : st;
         }
@@ -564,6 +600,10 @@ static uint64_t ch32_usart1_read(void *opaque, hwaddr addr, unsigned size)
              * 若 FIFO 已空则返回 0（不改变任何状态）。
              */
             uint32_t ret = 0;
+            if (m->usart1.status_read) {
+                m->usart1.statr &= ~(STATR_IDLE | STATR_ORE | STATR_NE | STATR_FE | STATR_PE);
+                m->usart1.status_read = false;
+            }
 
             if (m->usart1.rx_pending) {
                 ret = m->usart1.rdr;
@@ -616,6 +656,9 @@ static void ch32_usart1_write(void *opaque, hwaddr addr, uint64_t val,
         {
             uint16_t clr = (uint16_t)(~v & STATR_W0C_MASK); /* 写 0 = 清 */
             m->usart1.statr &= (uint16_t)~clr;
+            if (clr & STATR_TC) {
+                m->usart1.tx_complete = false;
+            }
             ch32_usart1_meip_resync(m);
         }
         return;
@@ -653,7 +696,7 @@ static void ch32_usart1_write(void *opaque, hwaddr addr, uint64_t val,
             if (!timer_pending(m->usart1.tx_timer)) {
                 timer_mod(m->usart1.tx_timer,
                           qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                          CH32_USART1_TX_DRAIN_NS);
+                          ch32_usart1_frame_ns(m));
             }
             ch32_usart1_meip_resync(m);
         }
@@ -726,6 +769,10 @@ void ch32_usart1_reset(Ch32MachineState *m)
     m->usart1.gpr      = 0;
     m->usart1.ctlr4    = 0;
 
+    m->usart1.status_read = false;
+    if (m->usart1.idle_timer) {
+        timer_del(m->usart1.idle_timer);
+    }
     /* RX FIFO */
     m->usart1.rx_head    = 0;
     m->usart1.rx_tail    = 0;
@@ -786,6 +833,7 @@ void ch32_usart1_init_mr(Ch32MachineState *m, Object *owner)
     m->usart1.tx_empty    = true;
     m->usart1.tx_complete = true;
 
+    m->usart1.idle_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ch32_usart1_idle, m);
     /* TX drain 定时器 */
     m->usart1.tx_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                                        ch32_usart1_tx_drain, m);

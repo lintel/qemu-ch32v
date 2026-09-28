@@ -99,6 +99,16 @@ static void ch32_machine_instance_init(Object *obj)
     s->boot_mode = CH32_BOOT_FLASH; /* 默认：程序闪存存储器启动 */
 }
 
+static bool ch32_prop_get_echo(Object *obj, Error **errp)
+{
+    return CH32_MACHINE(obj)->usart1_echo;
+}
+
+static void ch32_prop_set_echo(Object *obj, bool value, Error **errp)
+{
+    CH32_MACHINE(obj)->usart1_echo = value;
+}
+
 static char *ch32_prop_get_flash_image(Object *obj, Error **errp)
 {
     Ch32MachineState *s = CH32_MACHINE(obj);
@@ -935,6 +945,8 @@ static void ch32_machine_init(MachineState *machine, const Ch32BoardDesc *bd)
         if (bd->default_nic) {                                                  \
             mc->default_nic = bd->default_nic;                                 \
         }                                                                        \
+        object_class_property_add_bool(oc, "usart1-echo",                       \
+                                       ch32_prop_get_echo, ch32_prop_set_echo); \
         object_class_property_add_str(oc, "flash-image",                         \
                                       ch32_prop_get_flash_image,               \
                                       ch32_prop_set_flash_image);               \
