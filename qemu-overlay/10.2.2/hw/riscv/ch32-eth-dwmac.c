@@ -376,28 +376,21 @@ void ch32_eth_meip_resync(Ch32MachineState *m)
     if (!ienr_on || !dmasr_active) {
         if (env->wch_evt_mcause_override == n) {
             riscv_cpu_update_mip(env, MIP_MEIP, 0);
-            env->wch_evt_mcause_override = 0;
-            env->mie &= ~MIP_MEIP;
-            /* 清除 PFIC IACTR 中 ETH IRQ(77) 的激活状态 */
-            ch32_pfic_irq_active_clear(m, n);
+            if (env->wch_vtf_in_isr == 0) {
+                env->wch_evt_mcause_override = 0;
+                ch32_pfic_irq_active_clear(m, n);
+            }
             /*
              * ETH MEIP 撤销：通知其他外设重新评估其中断请求
              * （与 ch32-eth-10m.c 的 MEIP 撤销路径一致）。
              */
-            ch32_pfic_resync_pending_meip(m);
+            if (env->wch_vtf_in_isr == 0) {
+                ch32_pfic_resync_pending_meip(m);
+            }
         }
         /* DMASR 不再活跃 → 清除激活标志 */
         s->irq_active = false;
         riscv_cpu_interrupt(env);
-        return;
-    }
-    /*
-     * 中断风暴防护：如果 irq_active=true，说明 ETH 中断正在处理中，
-     * 不重复注入 MEIP。Guest 在 IRQ handler 中 W1C 清 DMASR 后
-     * irq_active 会被清除；之后若有新事件（poll timer/BH 设 DMASR），
-     * resync 会重新注入 MEIP。
-     */
-    if (s->irq_active) {
         return;
     }
     /*

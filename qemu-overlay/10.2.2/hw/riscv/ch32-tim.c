@@ -209,20 +209,20 @@ static void ch32_tim_meip_update(Ch32TimState *t)
     if (!ienr_on || !uif_active) {
         if (env->wch_evt_mcause_override == n) {
             riscv_cpu_update_mip(env, MIP_MEIP, 0);
-            env->wch_evt_mcause_override = 0;
-            env->mie &= ~MIP_MEIP;
-            ch32_pfic_irq_active_clear(m, n);
+            if (env->wch_vtf_in_isr == 0) {
+                env->wch_evt_mcause_override = 0;
+                ch32_pfic_irq_active_clear(m, n);
+            }
             /*
              * TIM MEIP 撤销：通知其他外设重新评估其中断请求
              * （与 ch32-eth-10m.c 的 MEIP 撤销路径一致）。
              */
-            ch32_pfic_resync_pending_meip(m);
+            if (env->wch_vtf_in_isr == 0) {
+                ch32_pfic_resync_pending_meip(m);
+            }
         }
         t->irq_active = false;
         riscv_cpu_interrupt(env);
-        return;
-    }
-    if (t->irq_active) {
         return;
     }
     /*
