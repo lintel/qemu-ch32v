@@ -135,7 +135,6 @@ void ch32_usbfs_host_meip_resync(Ch32MachineState *m)
 
     BQL_LOCK_GUARD();
     if (!line_on) {
-        env->mie &= ~MIP_MEIP;
         if (env->wch_evt_mcause_override == n) {
             riscv_cpu_update_mip(env, MIP_MEIP, 0);
             env->wch_evt_mcause_override = 0;
