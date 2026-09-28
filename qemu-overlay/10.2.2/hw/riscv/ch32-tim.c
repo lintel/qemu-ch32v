@@ -202,8 +202,7 @@ static void ch32_tim_meip_update(Ch32TimState *t)
     bit = n % 32u;
 
     ienr_on    = (m->pfic_ienr[wd] >> bit) & 1u;
-    uif_active = (t->intfr & TIM_INTFR_UIF) &&
-                 (t->dmaintenr & TIM_DMAINTENR_UIE);
+    uif_active = (t->intfr & t->dmaintenr & 0x1fu) != 0;
 
     BQL_LOCK_GUARD();
     if (!ienr_on || !uif_active) {
@@ -241,6 +240,55 @@ static void ch32_tim_meip_update(Ch32TimState *t)
     riscv_cpu_interrupt(env);
 }
 
+static void ch32_tim_schedule_compare(Ch32TimState *t)
+{
+    uint32_t hz = ch32_tim_cnt_hz(t);
+    uint32_t period = (uint32_t)t->atrlr + 1;
+    uint16_t compare[] = {t->ch1cvr, t->ch2cvr, t->ch3cvr, t->ch4cvr};
+    uint32_t nearest = UINT32_MAX;
+    uint64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    uint32_t count = ch32_tim_cnt_now_at(t, now);
+
+    if (!t->compare_timer) {
+        return;
+    }
+    timer_del(t->compare_timer);
+    t->compare_flags = 0;
+    if (!(t->ctlr1 & TIM_CTLR1_CEN) || !hz || !ch32_tim_is_gptm(t)) {
+        return;
+    }
+    for (unsigned i = 0; i < 4; ++i) {
+        uint16_t mode = i < 2 ? t->chctlr1 : t->chctlr2;
+        if (((mode >> ((i % 2) * 8)) & 3) || compare[i] >= period) {
+            continue;
+        }
+        uint32_t delta = (compare[i] + period - count) % period;
+        if (!delta) {
+            delta = period;
+        }
+        if (delta < nearest) {
+            nearest = delta;
+            t->compare_flags = 0;
+        }
+        if (delta == nearest) {
+            t->compare_flags |= 2u << i;
+        }
+    }
+    if (t->compare_flags) {
+        uint64_t elapsed_ticks = (now - t->epoch_ns) * hz / 1000000000;
+        timer_mod_ns(t->compare_timer, t->epoch_ns +
+                     ((elapsed_ticks + nearest) * 1000000000 + hz - 1) / hz);
+    }
+}
+
+static void ch32_tim_compare_tick(void *opaque)
+{
+    Ch32TimState *t = opaque;
+    t->intfr |= t->compare_flags;
+    ch32_tim_meip_update(t);
+    ch32_tim_schedule_compare(t);
+}
+
 /*
  * 调度下一次定时器到期（下一次 UIF 事件）。
  * 在 CEN、PSC、ATRLR 或 CNT 变化时调用。
@@ -253,6 +301,7 @@ static void ch32_tim_schedule(Ch32TimState *t)
     uint32_t ticks_left;
     uint64_t delay_ns, now_ns;
 
+    ch32_tim_schedule_compare(t);
     if (!t->timer) {
         return;
     }
@@ -444,7 +493,7 @@ static void ch32_tim_write(void *opaque, hwaddr addr, uint64_t val64,
     case TIM_OFF_INTFR:
         /* W0C：固件写 0 清除对应标志位 */
         t->intfr &= v16;
-        if (!(t->intfr & TIM_INTFR_UIF)) {
+        if (!(t->intfr & t->dmaintenr & 0x1fu)) {
             t->irq_active = false;
         }
         ch32_tim_meip_update(t);
@@ -467,11 +516,13 @@ static void ch32_tim_write(void *opaque, hwaddr addr, uint64_t val64,
     case TIM_OFF_CHCTLR1:
         if (!ch32_tim_is_bctm(t)) {
             t->chctlr1 = v16;
+            ch32_tim_schedule_compare(t);
         }
         break;
     case TIM_OFF_CHCTLR2:
         if (!ch32_tim_is_bctm(t)) {
             t->chctlr2 = v16;
+            ch32_tim_schedule_compare(t);
         }
         break;
     case TIM_OFF_CCER:
@@ -506,21 +557,25 @@ static void ch32_tim_write(void *opaque, hwaddr addr, uint64_t val64,
     case TIM_OFF_CH1CVR:
         if (!ch32_tim_is_bctm(t)) {
             t->ch1cvr = v16;
+            ch32_tim_schedule_compare(t);
         }
         break;
     case TIM_OFF_CH2CVR:
         if (!ch32_tim_is_bctm(t)) {
             t->ch2cvr = v16;
+            ch32_tim_schedule_compare(t);
         }
         break;
     case TIM_OFF_CH3CVR:
         if (!ch32_tim_is_bctm(t)) {
             t->ch3cvr = v16;
+            ch32_tim_schedule_compare(t);
         }
         break;
     case TIM_OFF_CH4CVR:
         if (!ch32_tim_is_bctm(t)) {
             t->ch4cvr = v16;
+            ch32_tim_schedule_compare(t);
         }
         break;
     case TIM_OFF_BDTR:
@@ -558,6 +613,10 @@ static const MemoryRegionOps ch32_tim_ops = {
  */
 static void ch32_tim_reset_one(Ch32TimState *t)
 {
+    if (t->compare_timer) {
+        timer_del(t->compare_timer);
+    }
+    t->compare_flags = 0;
     if (t->timer) {
         timer_del(t->timer);
     }
@@ -628,6 +687,7 @@ void ch32_tim_init_all(Ch32MachineState *m, Object *owner)
                                             &t->iomem, 2);
 
         t->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ch32_tim_tick, t);
+        t->compare_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ch32_tim_compare_tick, t);
     }
 }
 
