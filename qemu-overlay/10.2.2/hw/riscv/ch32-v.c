@@ -99,6 +99,21 @@ static void ch32_machine_instance_init(Object *obj)
     s->boot_mode = CH32_BOOT_FLASH; /* 默认：程序闪存存储器启动 */
 }
 
+static char *ch32_prop_get_hse(Object *obj, Error **errp)
+{
+    return g_strdup_printf("%u", CH32_MACHINE(obj)->hse_frequency);
+}
+
+static void ch32_prop_set_hse(Object *obj, const char *value, Error **errp)
+{
+    uint64_t hz;
+    if (qemu_strtosz(value, NULL, &hz) < 0 || hz < 1000000 || hz > 50000000) {
+        error_setg(errp, "hse-frequency must be between 1000000 and 50000000 Hz");
+        return;
+    }
+    CH32_MACHINE(obj)->hse_frequency = hz;
+}
+
 static char *ch32_prop_get_flash_image(Object *obj, Error **errp)
 {
     Ch32MachineState *s = CH32_MACHINE(obj);
@@ -935,6 +950,8 @@ static void ch32_machine_init(MachineState *machine, const Ch32BoardDesc *bd)
         if (bd->default_nic) {                                                  \
             mc->default_nic = bd->default_nic;                                 \
         }                                                                        \
+        object_class_property_add_str(oc, "hse-frequency",                     \
+                                      ch32_prop_get_hse, ch32_prop_set_hse);   \
         object_class_property_add_str(oc, "flash-image",                         \
                                       ch32_prop_get_flash_image,               \
                                       ch32_prop_set_flash_image);               \

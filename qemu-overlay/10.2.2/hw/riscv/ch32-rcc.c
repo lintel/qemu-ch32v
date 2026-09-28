@@ -44,6 +44,9 @@ static uint32_t ch32_rcc_hsi_hz(const Ch32MachineState *m)
 
 static uint32_t ch32_rcc_hse_hz(const Ch32MachineState *m)
 {
+    if (m->hse_frequency) {
+        return m->hse_frequency;
+    }
     if (m->board && m->board->hse_hz) {
         return m->board->hse_hz;
     }
@@ -102,6 +105,23 @@ static uint32_t ch32_rcc_calc_sysclk(const Ch32MachineState *m)
         uint32_t pllsrc = (cfgr0 >> 16) & 1u;
         uint32_t pllmul = (cfgr0 >> 18) & 0xfu;
         uint32_t pll_in = pllsrc ? hse_hz : (hsi_hz / 2u);
+        if (pllsrc && m->board && !strcmp(m->board->tag, "ch32v307")) {
+            uint32_t cfgr2 = m->rcc_shadow.words[0x2c / 4];
+            if (cfgr2 & (1u << 16)) {
+                uint32_t mul = (cfgr2 >> 8) & 15;
+                pll_in /= ((cfgr2 >> 4) & 15) + 1;
+                pll_in = mul == 0 ? pll_in * 5 / 2 :
+                         mul == 1 ? pll_in * 25 / 2 :
+                         pll_in * (mul == 15 ? 20 : mul + 2);
+            }
+            pll_in /= (cfgr2 & 15) + 1;
+        }
+        if (m->board && !strcmp(m->board->tag, "ch32v307")) {
+            static const unsigned mul2[] = {
+                36, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 13, 30, 32
+            };
+            return pll_in * mul2[pllmul] / 2;
+        }
         return pll_in * ch32_rcc_pll_mul(pllmul);
     }
     /* SW=0 HSI，或 SW=3 保留 */
@@ -129,7 +149,7 @@ uint32_t ch32_rcc_get_pclk1_hz(const Ch32MachineState *m)
 }
 
 /* CFGR0 中会影响 HCLK/PCLK1 的位：SW[1:0] | HPRE[7:4] | PPRE1[10:8] | PLLSRC[16] | PLLMUL[21:18] */
-#define RCC_CFGR0_CLOCK_MASK  (0x003D07F3u)
+#define RCC_CFGR0_CLOCK_MASK  (0x003F07F3u)
 
 
 static uint32_t ch32_rcc_read_reg(Ch32MachineState *m, uint32_t aligned_addr)
@@ -247,6 +267,16 @@ static void ch32_rcc_write(void *opaque, hwaddr addr, uint64_t val, unsigned siz
     }
 
     s->words[aligned_addr / 4] = new_val;
+    if (m->board && !strcmp(m->board->tag, "ch32v307")) {
+        /* PLLXTPRE and PREDIV1[0] are the same hardware bit. */
+        if (aligned_addr == 4) {
+            s->words[0x2c / 4] = (s->words[0x2c / 4] & ~1u) |
+                                  ((new_val >> 17) & 1u);
+        } else if (aligned_addr == 0x2c) {
+            s->words[1] = (s->words[1] & ~(1u << 17)) |
+                          ((new_val & 1u) << 17);
+        }
+    }
 
     /*
      * CFGR0 写入可能改变 HCLK/PCLK1。旧值与新值在频率相关位上不同时，
@@ -254,8 +284,9 @@ static void ch32_rcc_write(void *opaque, hwaddr addr, uint64_t val, unsigned siz
      * 注意：shadow 存的是寄存器字面量（已在前面 RCC_SWS_MASK 清除只读位），
      * 与 read_reg 合成 SWS 的路径无关，直接对比 v 与 new_val 即可。
      */
-    if (aligned_addr == 4 &&
-        ((v ^ new_val) & RCC_CFGR0_CLOCK_MASK) != 0u) {
+    if ((aligned_addr == 4 &&
+         ((v ^ new_val) & RCC_CFGR0_CLOCK_MASK) != 0u) ||
+        (aligned_addr == 0x2c && v != new_val)) {
         ch32_stk_rcc_clock_changed(m);
         ch32_tim_rcc_clock_changed(m);
     }
