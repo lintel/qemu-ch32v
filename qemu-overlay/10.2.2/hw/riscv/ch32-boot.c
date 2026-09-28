@@ -117,6 +117,8 @@ void ch32_esig_populate(uint8_t *p, size_t sz, const Ch32BoardDesc *bd,
         /* CHIP_CH32V317VCT6 (OrayOS-Tiny chipid.h) */
         id = 0x3173b508u;
     } else if (!strcmp(bd->tag, "ch32v307")) {
+        /* WCH RCC_PLLConfig/GetClocksFreq use this factory D8C marker. */
+        stl_le_p(p + 0x0c, 1u << 14);
         /*
          * CH32V307VCT6 CHIP_ID：按 CH32V30x 系列格式，低字节 0x14 使
          * (ChipId & 0xf0) == 0x10，驱动 eth_driver_10M.c 识别为 CH32V30x 平台。

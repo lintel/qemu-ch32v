@@ -535,6 +535,7 @@ typedef struct Ch32I2cState {
 
 typedef struct Ch32MachineState {
     MachineState parent;
+    uint32_t hse_frequency;
     RISCVHartArrayState cpus;
     MemoryRegion flash;
     MemoryRegion boot_remap; /* 0x00000000 启动重映射：根据 boot_mode 映射到 Flash/SYSMEM */
