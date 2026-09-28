@@ -84,6 +84,10 @@ static bool ch32_eth_ptr_in_main_sram(hwaddr p)
 #define CH32_ETH_OFF_DMARPDR   0x1008u
 #define CH32_ETH_OFF_DMARDLAR  0x100cu
 #define CH32_ETH_OFF_DMATDLAR  0x1010u
+#define CH32_ETH_OFF_DMACHTDR  0x1048u
+#define CH32_ETH_OFF_DMACHRDR  0x104cu
+#define CH32_ETH_OFF_DMACHTBAR 0x1050u
+#define CH32_ETH_OFF_DMACHRBAR 0x1054u
 #define CH32_ETH_OFF_DMASR     0x1014u
 #define CH32_ETH_OFF_DMAOMR    0x1018u
 #define CH32_ETH_OFF_DMAIER    0x101cu
@@ -843,12 +847,14 @@ static void ch32_eth_process_tx(Ch32EthState *s)
             s->tx_cur_desc = base;
             break;
         }
+        s->mmio_w[CH32_ETH_OFF_DMACHTDR / 4] = da;
         ch32_eth_desc_read(da, &td0, &td1, &td2, &td3);
         if ((td0 & CH32_ETH_DMATX_OWN) == 0) {
             /* 无待发描述符 */
             break;
         }
         len = td1 & 0x1fffu;
+        s->mmio_w[CH32_ETH_OFF_DMACHTBAR / 4] = td2;
         if (len == 0 || len > CH32_ETH_PKT_MAX) {
             /* 描述符长度异常，跳过并前进 */
             td0 &= ~CH32_ETH_DMATX_OWN;
@@ -930,6 +936,7 @@ static void ch32_eth_deliver_rx_stash(Ch32EthState *s)
             s->rx_cur_desc = base;
             break;
         }
+        s->mmio_w[CH32_ETH_OFF_DMACHRDR / 4] = da;
         ch32_eth_desc_read(da, &rd0, &rd1, &rd2, &rd3);
         if ((rd0 & CH32_ETH_DMARX_OWN) == 0) {
             /*
@@ -940,6 +947,7 @@ static void ch32_eth_deliver_rx_stash(Ch32EthState *s)
                              (hwaddr)rd3 : base;
             continue;
         }
+        s->mmio_w[CH32_ETH_OFF_DMACHRBAR / 4] = rd2;
         if (!ch32_eth_span_in_main_sram((hwaddr)rd2, s->rx_stash_len)) {
             /*
              * 描述符 buf 指针无效（rd2 超出 SRAM），丢弃此帧并前进游标。
@@ -1272,6 +1280,9 @@ static void ch32_eth_mmio_write_word(Ch32EthState *s, hwaddr addr, uint32_t val)
     }
     wi = (unsigned)(addr / 4);
 
+    if (addr >= CH32_ETH_OFF_DMACHTDR && addr <= CH32_ETH_OFF_DMACHRBAR) {
+        return;
+    }
     if (addr == CH32_ETH_OFF_MACMIIAR) {
         s->mmio_w[wi] = val;
         if (val & CH32_ETH_MACMIIAR_MB) {
